@@ -1773,6 +1773,13 @@ void input_event_osk_iterate(
    switch (osk_idx)
    {
 #ifdef HAVE_LANGEXTRA
+#ifdef KOREAN
+      case OSK_HANGUL_PAGE:
+         memcpy(osk_grid,
+               hangul_grid,
+               sizeof(hangul_grid));
+         break;
+#endif
       case OSK_HIRAGANA_PAGE1:
          memcpy(osk_grid,
                hiragana_page1_grid,

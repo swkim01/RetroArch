@@ -28,6 +28,9 @@
 #include "input_remapping.h"
 #include "input_osk.h"
 #include "input_types.h"
+#ifdef KOREAN
+#include "input/input_hangul.h"
+#endif
 
 #ifdef HAVE_NETWORKING
 #include <net/net_compat.h>
@@ -921,12 +924,132 @@ int16_t input_joypad_analog_axis(
    return res;
 }
 
+#ifdef KOREAN
+static bool hangul_is_preedit = false;
+
+static unsigned commit_len = 0, preedit_len = 0;
+
+static unsigned input_keyboard_hangul_preprocess(
+      struct input_keyboard_line *keyboard_line,
+      unsigned osk_last_codepoint_len)
+{
+   unsigned i                  = 0;
+   unsigned len = 0;
+   char *commit = 0, *preedit = 0;
+
+   if (hangul_is_preedit) {
+      for (i = 0; i < osk_last_codepoint_len; i++)
+      {
+         memmove(keyboard_line->buffer + keyboard_line->ptr - 1,
+               keyboard_line->buffer + keyboard_line->ptr,
+               keyboard_line->size - keyboard_line->ptr);
+         keyboard_line->ptr--;
+         keyboard_line->size--;
+      }
+   }
+   commit = hangul_get_commit_string_utf8();
+   if (commit != NULL) {
+      commit_len = strlen(commit) - commit_len;
+      len += commit_len;
+      free(commit);
+   }
+   preedit = hangul_get_preedit_string_utf8();
+   if (preedit != NULL) {
+      preedit_len = strlen(preedit);
+      len += preedit_len;
+      hangul_is_preedit = true;
+      free(preedit);
+   } else
+      hangul_is_preedit = false;
+
+   return len;
+}
+
+static void input_keyboard_hangul_process(
+      struct input_keyboard_line *keyboard_line,
+      char *newbuf)
+{
+   char *commit = 0, *preedit = 0;
+
+   commit = hangul_get_commit_string_utf8();
+   if (commit != NULL) {
+      unsigned c_last = strlen(commit) - commit_len;
+      memcpy(newbuf + keyboard_line->ptr, &commit[c_last], commit_len);
+      keyboard_line->ptr += commit_len;
+      keyboard_line->size += commit_len;
+      free(commit);
+   }
+   preedit = hangul_get_preedit_string_utf8();
+   if (preedit != NULL) {
+      memcpy(newbuf + keyboard_line->ptr, preedit, preedit_len);
+      keyboard_line->ptr += preedit_len;
+      keyboard_line->size += preedit_len;
+      free(preedit);
+   }
+}
+
+static void input_keyboard_hangul_postprocess(
+      unsigned *osk_last_codepoint,
+      unsigned *osk_last_codepoint_len)
+{
+   char *commit = 0, *preedit = 0;
+
+   commit = hangul_get_commit_string_utf8();
+   if (commit != NULL) {
+       osk_update_last_codepoint(
+               osk_last_codepoint,
+               osk_last_codepoint_len,
+	       (const char *)commit);
+       free(commit);
+   }
+   preedit = hangul_get_preedit_string_utf8();
+   if (preedit != NULL) {
+       osk_update_last_codepoint(
+               osk_last_codepoint,
+               osk_last_codepoint_len,
+	       (const char *)preedit);
+       free(preedit);
+   }
+}
+#endif
+
 bool input_keyboard_line_append(
       struct input_keyboard_line *keyboard_line,
+#if KOREAN
+      unsigned *osk_last_codepoint,
+      unsigned *osk_last_codepoint_len,
+#endif
       const char *word)
 {
    unsigned i                  = 0;
+#ifdef KOREAN
+   unsigned len = 0;
+   char *commit = 0, *preedit = 0;
+   unsigned short uni = utf8_to_unicode((unsigned char *)word);
+
+   commit = hangul_get_commit_string_utf8();
+   if (commit != NULL) {
+      commit_len = strlen(commit);
+      free(commit);
+   }
+   preedit = hangul_get_preedit_string_utf8();
+   if (preedit != NULL) {
+      preedit_len = strlen(preedit);
+      free(preedit);
+   }
+   input_hangul_process(uni);
+   if (hangul_get_jamo(uni))
+      len = input_keyboard_hangul_preprocess(
+		      keyboard_line,
+		      *osk_last_codepoint_len);
+   else
+      len = (unsigned)strlen(word);
+
+   if (!len)
+      return false;
+#else
    unsigned len                = (unsigned)strlen(word);
+#endif
    char *newbuf                = (char*)realloc(
          keyboard_line->buffer,
          keyboard_line->size + len * 2);
@@ -939,6 +1062,11 @@ bool input_keyboard_line_append(
          newbuf + keyboard_line->ptr,
          keyboard_line->size - keyboard_line->ptr + len);
 
+#ifdef KOREAN
+   if (hangul_get_jamo(uni)) {
+      input_keyboard_hangul_process(keyboard_line, newbuf);
+   } else
+#endif
    for (i = 0; i < len; i++)
    {
       newbuf[keyboard_line->ptr]= word[i];
@@ -2303,7 +2431,22 @@ void input_event_osk_append(
          *osk_idx = ((enum osk_type)(OSK_TYPE_UNKNOWN + 1));
    else
    {
+#if KOREAN
+      input_keyboard_line_append(keyboard_line,
+              osk_last_codepoint,
+              osk_last_codepoint_len,
+              word);
+#else
       input_keyboard_line_append(keyboard_line, word);
+#endif
+#if KOREAN
+      unsigned short uni = utf8_to_unicode((unsigned char *)word);
+      if (hangul_get_jamo(uni))
+         input_keyboard_hangul_postprocess(
+	     osk_last_codepoint,
+	     osk_last_codepoint_len);
+      else
+#endif
       osk_update_last_codepoint(
             osk_last_codepoint,
             osk_last_codepoint_len,
@@ -3097,6 +3240,32 @@ void input_driver_deinit_command(input_driver_state_t *input_st)
 }
 #endif
 
+#ifdef KOREAN
+static void input_keyboard_hangul_backspace(
+      input_driver_state_t *input_st,
+      input_keyboard_line_t *state)
+{
+   unsigned preedit_len = 0;
+   char *preedit = 0;
+
+   input_hangul_backspace();
+   preedit = hangul_get_preedit_string_utf8();
+   if (preedit) {
+      preedit_len = strlen(preedit);
+      memcpy(state->buffer + state->ptr, preedit, preedit_len);
+      state->ptr += preedit_len;
+      state->size += preedit_len;
+      osk_update_last_codepoint(
+            &input_st->osk_last_codepoint,
+            &input_st->osk_last_codepoint_len,
+            (const char *)preedit);
+      free(preedit);
+   } else {
+      hangul_is_preedit = false;
+   }
+}
+#endif
+
 bool input_keyboard_line_event(
       input_driver_state_t *input_st,
       input_keyboard_line_t *state, uint32_t character)
@@ -3118,6 +3287,11 @@ bool input_keyboard_line_event(
 
       ret      = true;
       word     = array;
+#ifdef KOREAN
+      input_hangul_flush();
+      hangul_is_preedit = false;
+#endif
+
    }
    else if (c == '\b' || c == '\x7f') /* 0x7f is ASCII for del */
    {
@@ -3135,6 +3309,9 @@ bool input_keyboard_line_event(
          }
 
          word     = state->buffer;
+#ifdef KOREAN
+         input_keyboard_hangul_backspace(input_st, state);
+#endif
       }
    }
    else if (ISPRINT(c))

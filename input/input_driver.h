@@ -845,6 +845,10 @@ int16_t input_joypad_analog_axis(
 
 bool input_keyboard_line_append(
       struct input_keyboard_line *keyboard_line,
+#ifdef KOREAN
+      unsigned *osk_last_codepoint,
+      unsigned *osk_last_codepoint_len,
+#endif
       const char *word);
 
 /**
