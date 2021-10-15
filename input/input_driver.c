@@ -1015,7 +1015,7 @@ static void input_keyboard_hangul_postprocess(
 
 bool input_keyboard_line_append(
       struct input_keyboard_line *keyboard_line,
-#if KOREAN
+#ifdef KOREAN
       unsigned *osk_last_codepoint,
       unsigned *osk_last_codepoint_len,
 #endif
@@ -1077,6 +1077,14 @@ bool input_keyboard_line_append(
    newbuf[keyboard_line->size]  = '\0';
 
    keyboard_line->buffer        = newbuf;
+
+#ifdef KOREAN
+   if (hangul_get_jamo(uni))
+      input_keyboard_hangul_postprocess(
+	     osk_last_codepoint,
+	     osk_last_codepoint_len);
+#endif
+
    return true;
 }
 
@@ -2431,7 +2439,7 @@ void input_event_osk_append(
          *osk_idx = ((enum osk_type)(OSK_TYPE_UNKNOWN + 1));
    else
    {
-#if KOREAN
+#ifdef KOREAN
       input_keyboard_line_append(keyboard_line,
               osk_last_codepoint,
               osk_last_codepoint_len,
@@ -2439,13 +2447,9 @@ void input_event_osk_append(
 #else
       input_keyboard_line_append(keyboard_line, word);
 #endif
-#if KOREAN
+#ifdef KOREAN
       unsigned short uni = utf8_to_unicode((unsigned char *)word);
-      if (hangul_get_jamo(uni))
-         input_keyboard_hangul_postprocess(
-	     osk_last_codepoint,
-	     osk_last_codepoint_len);
-      else
+      if (!hangul_get_jamo(uni))
 #endif
       osk_update_last_codepoint(
             osk_last_codepoint,

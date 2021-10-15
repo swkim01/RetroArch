@@ -56,6 +56,9 @@
 #include "../input/input_remapping.h"
 #include "../performance_counters.h"
 #include "../version.h"
+#ifdef KOREAN
+#include "../input/input_hangul.h"
+#endif
 
 #ifdef HAVE_LIBNX
 #include <switch.h>
@@ -5707,8 +5710,18 @@ bool menu_input_dialog_get_display_kb(void)
             char oldchar     = buf[i+1];
             buf[i+1]         = '\0';
 
+#ifdef KOREAN
+            input_keyboard_line_append(&input_st->keyboard_line,
+                    &input_st->osk_last_codepoint,
+                    &input_st->osk_last_codepoint_len,
+                    word);
+#else
             input_keyboard_line_append(&input_st->keyboard_line, word);
-
+#endif
+#ifdef KOREAN
+            unsigned short uni = utf8_to_unicode((unsigned char *)word);
+            if (!hangul_get_jamo(uni))
+#endif
             osk_update_last_codepoint(
                   &input_st->osk_last_codepoint,
                   &input_st->osk_last_codepoint_len,
