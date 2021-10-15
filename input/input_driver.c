@@ -29,7 +29,7 @@
 #include "input_osk.h"
 #include "input_types.h"
 #ifdef KOREAN
-#include "input/input_hangul.h"
+#include "input_hangul.h"
 #endif
 
 #ifdef HAVE_NETWORKING
